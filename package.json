@@ -1,0 +1,21 @@
+{
+  "name": "ai-project-orchestrator",
+  "version": "1.0.0",
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+"scripts": {
+  "dev": "node --watch --experimental-transform-types src/main.ts",
+  "start": "node --experimental-transform-types src/main.ts"
+},
+  "dependencies": {
+    "vk-io": "^4.8.0",
+    "zod": "^3.23.0",
+    "dotenv": "^16.4.5",
+    "simple-git": "^3.24.0",
+    "axios": "^1.6.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.4.0"
+  }
+}
