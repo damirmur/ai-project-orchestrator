@@ -1,7 +1,9 @@
+// src/modules/vk/vk.service.ts
 import { VK, Keyboard } from 'vk-io';
 import 'dotenv/config';
 import { lmsService } from '../ai/lms.service.ts';
 import { state } from '../state/state.service.ts';
+import { logIncoming, logOutgoing, logCommand, logModelRequest, logModelResponse, logSessionState } from '../logger/logger.service.ts';
 import { opencode } from '../project/opencode.service.ts';
 
 export const vk = new VK({
@@ -15,6 +17,11 @@ export const vk = new VK({
 
 
 async function sendModelsPicker(context: any) {
+  // Helper to send and log from inside this function
+  async function innerSend(msg: any) {
+    await logOutgoing(String(context.peerId), typeof msg === 'string' ? msg : JSON.stringify(msg));
+    return context.send(msg);
+  }
     const models = await lmsService.getModels();
     const keyboard = Keyboard.builder();
     models.slice(0, 5).forEach(m => {
@@ -24,11 +31,18 @@ async function sendModelsPicker(context: any) {
             color: 'primary'
         }).row();
     });
-    return context.send({ message: '🤖 Выберите модель:', keyboard: keyboard.inline() });
+    return innerSend({ message: '🤖 Выберите модель:', keyboard: keyboard.inline() });
 }
 
 vk.updates.on('message_new', async (context) => {
+  // Helper to send a response and log it
+  async function sendLog(msg: any) {
+    await logOutgoing(String(context.peerId), typeof msg === 'string' ? msg : JSON.stringify(msg));
+    return context.send(msg);
+  }
   let { text, senderId, peerId, id, messagePayload } = context;
+  // Log incoming message
+  await logIncoming(String(senderId), String(peerId), context.device?.type ?? 'unknown', text ?? '');
 
   // 0. Сформировать ключ сессии (user + chat) и получить объект сессии
   const sessionKey = `${senderId}:${peerId}`;
@@ -64,8 +78,9 @@ vk.updates.on('message_new', async (context) => {
             // Выполняем отложенный запрос напрямую
             await vk.api.messages.setActivity({ peer_id: peerId, type: 'typing' }).catch(() => { });
             const aiResponse = await lmsService.chat(pending);
-            session.lastAiResponse = aiResponse;
-            return context.send(aiResponse);
+session.lastAiResponse = aiResponse;
+              await logModelResponse(String(senderId), String(peerId), aiResponse);
+            return sendLog(aiResponse);
         }
         return;
     }
@@ -75,29 +90,31 @@ if (cmdPayload === 'confirm_write') {
   const content = session.stagedContent;
 
   if (!fileName || !content) {
-    return context.send('❌ Ошибка: черновик пуст или файл не выбран.');
+    return sendLog('❌ Ошибка: черновик пуст или файл не выбран.');
   }
 
   const success = await opencode.writeFile(fileName, content);
   if (success) {
     // Очистить staged‑данные в сессии
     await state.updateSession(sessionKey, s => { s.stagedContent = null; s.activeFilePath = null; });
-    return context.send(`✅ Файл "${fileName}" успешно обновлен.`);
+              await logSessionState(String(senderId), String(peerId), state.getSession(sessionKey));
+    return sendLog(`✅ Файл "${fileName}" успешно обновлен.`);
   } else {
-    return context.send('❌ Ошибка при записи файла.');
+    return sendLog('❌ Ошибка при записи файла.');
   }
 }
 
 if (cmdPayload === 'cancel_write') {
   await state.updateSession(sessionKey, s => { s.stagedContent = null; s.activeFilePath = null; });
-  return context.send('🚫 Изменения отклонены.');
+              await logSessionState(String(senderId), String(peerId), state.getSession(sessionKey));
+  return sendLog('🚫 Изменения отклонены.');
 }
 
     // --- БЛОК Б: СИСТЕМНЫЕ КОМАНДЫ (Инфо, Меню, Статус, Файлы) ---
 
     if (normalizedText === 'ℹ️ Инфо' || normalizedText === '/info' || cmdPayload === 'info') {
         const stats = await lmsService.getSystemStats();
-        await context.send(`🛡 [System Info]\n🌐 Провайдер: ${stats.provider}\n🧠 Модель: ${stats.activeModel.split('/').pop()}\n📁 Проект: ${stats.projectRoot}`);
+        await sendLog(`🛡 [System Info]\n🌐 Провайдер: ${stats.provider}\n🧠 Модель: ${stats.activeModel.split('/').pop()}\n📁 Проект: ${stats.projectRoot}`);
         return;
     }
 
@@ -115,18 +132,18 @@ if (cmdPayload === 'cancel_write') {
 
     // --- ПИНГ ---
     if (cmdPayload === 'ping') {
-        return context.send('🏓 Понг! Бот в сети.');
+        return sendLog('🏓 Понг! Бот в сети.');
     }
 
     if (normalizedText === '/status' || cmdPayload === 'status') {
         const isOnline = await lmsService.checkStatus();
-        await context.send(`📊 LMS Server: ${isOnline ? '🟢 Online' : '🔴 Offline'}`);
+        await sendLog(`📊 LMS Server: ${isOnline ? '🟢 Online' : '🔴 Offline'}`);
         return;
     }
 
 if (normalizedText === '📂 файлы' || normalizedText === '/list' || cmdPayload === 'list') {
   const files = await opencode.getFilesList();
-  if (files.length === 0) return context.send('📂 Файлы не найдены.');
+  if (files.length === 0) return sendLog('📂 Файлы не найдены.');
 
   const keyboard = Keyboard.builder();
   // Выводим максимум 10 файлов для удобства
@@ -138,7 +155,7 @@ if (normalizedText === '📂 файлы' || normalizedText === '/list' || cmdPay
     }).row();
   });
 
-  return context.send({ message: '📂 Выберите файл для анализа:', keyboard: keyboard.inline() });
+  return sendLog({ message: '📂 Выберите файл для анализа:', keyboard: keyboard.inline() });
 }
 
     if (normalizedText === '🤖 Модели' || normalizedText === '/models' || cmdPayload === 'models') {
@@ -163,9 +180,9 @@ if (normalizedText === '📂 файлы' || normalizedText === '/list' || cmdPay
         const content = await opencode.readFile(fileName);
         if (content) {
             lmsService.setFileContext(content);
-            await context.send(`📄 Код "${fileName}" загружен в ИИ.`);
+            await sendLog(`📄 Код "${fileName}" загружен в ИИ.`);
         } else {
-            await context.send(`❌ Ошибка чтения "${fileName}".`);
+            await sendLog(`❌ Ошибка чтения "${fileName}".`);
         }
         return;
     }
@@ -176,11 +193,12 @@ if (cmdPayload === 'auto_read') {
   
   if (content) {
     await state.updateSession(sessionKey, s => { s.activeFilePath = fileName; }); // Запоминаем путь
+              await logSessionState(String(senderId), String(peerId), state.getSession(sessionKey));
     lmsService.setFileContext(content); // Отправляем в ИИ
-    await context.send(`🎯 Активный файл выбран: ${fileName}. Теперь вы можете отправить запрос к ИИ.`);
+    await sendLog(`🎯 Активный файл выбран: ${fileName}. Теперь вы можете отправить запрос к ИИ.`);
     return; // Обязательно выходим!
   } else {
-    await context.send(`❌ Не удалось прочитать ${fileName}`);
+    await sendLog(`❌ Не удалось прочитать ${fileName}`);
     return;
   }
 }
@@ -189,15 +207,17 @@ if (cmdPayload === 'auto_read') {
 if (normalizedText === '/write' || normalizedText.startsWith('/write ')) {
   let fileName = normalizedText.replace('/write', '').trim() || session.activeFilePath;
   
-  if (!fileName) return context.send('❌ Активный файл не выбран.');
-  if (!session.lastAiResponse) return context.send('❌ ИИ еще не предложил код.');
+  if (!fileName) return sendLog('❌ Активный файл не выбран.');
+  if (!session.lastAiResponse) return sendLog('❌ ИИ еще не предложил код.');
 
   // Очистка от Markdown
   const cleanCode = session.lastAiResponse?.replace(/```[\s\S]*?\n/g, '').replace(/```/g, '').trim();
   
   // СОХРАНЯЕМ В СЕРВИС
-  await state.updateSession(sessionKey, s => { s.activeFilePath = fileName; }); 
+await state.updateSession(sessionKey, s => { s.activeFilePath = fileName; });
+              await logSessionState(String(senderId), String(peerId), state.getSession(sessionKey));
   await state.updateSession(sessionKey, s => { s.stagedContent = cleanCode; });
+              await logSessionState(String(senderId), String(peerId), state.getSession(sessionKey));
 
   const keyboard = Keyboard.builder()
     .textButton({ label: '✅ Принять', payload: { command: 'confirm_write' }, color: 'positive' })
@@ -213,15 +233,17 @@ if (normalizedText === '/write' || normalizedText.startsWith('/write ')) {
         // Если модель не выбрана — запоминаем и предлагаем выбрать
         if (!lmsService.hasActiveModel()) {
             lmsService.setPending(normalizedText);
-            await context.send('⚠️ Модель не выбрана. Выберите «мозг», чтобы я ответил на ваш запрос:');
+            await sendLog('⚠️ Модель не выбрана. Выберите «мозг», чтобы я ответил на ваш запрос:');
             return sendModelsPicker(context); // Используем нашу функцию вместо handleStatus
         }
 
         try {
             await vk.api.messages.setActivity({ peer_id: peerId, type: 'typing' }).catch(() => { });
-            const aiResponse = await lmsService.chat(normalizedText);
-session.lastAiResponse = aiResponse;
-            return context.send(aiResponse);
+            await logModelRequest(String(senderId), String(peerId), normalizedText, lmsService.getActiveModelId?.() || 'unknown', undefined);
+const aiResponse = await lmsService.chat(normalizedText);
+                    session.lastAiResponse = aiResponse;
+                    await logModelResponse(String(senderId), String(peerId), aiResponse);
+                    return sendLog(aiResponse);
         } catch (error) {
             return context.send('💥 Ошибка генерации.');
         }

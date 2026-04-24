@@ -1,0 +1,13 @@
+{
+  "global": {},
+  "sessions": {
+    "test:1": {
+      "activeFilePath": "example.ts",
+      "stagedContent": "console.log(\"hello\");"
+    },
+    "34240560:2000000004": {
+      "lastAiResponse": "Здравствуйте! Я готов помочь вам. Чем я могу быть полезен сегодня? 😊",
+      "activeFilePath": "src/1.txt"
+    }
+  }
+}

@@ -1,4 +1,6 @@
+// src/modules/project/opencode.service.ts
 import fs from 'node:fs/promises';
+import { logFileOp } from '../logger/logger.service.ts';
 import path from 'node:path';
 
 let activeFilePath: string | null = null;
@@ -25,10 +27,12 @@ export const opencode = {
       try { await fs.copyFile(fullPath, `${fullPath}.bak`); } catch {}
 
       await fs.writeFile(fullPath, content, 'utf-8');
+      await logFileOp('write', filePath, true);
       return true;
     } catch (error) {
-      console.error('[Opencode Error]:', error);
-      return false;
+console.error('[Opencode Error]:', error);
+       await logFileOp('write', filePath, false, (error as any).message);
+       return false;
     }
   },
 
@@ -42,10 +46,13 @@ export const opencode = {
         return null;
       }
 
-      return await fs.readFile(fullPath, 'utf-8');
+      const data = await fs.readFile(fullPath, 'utf-8');
+        await logFileOp('read', filePath, true);
+        return data;
     } catch (error) {
-      console.error('[Opencode Error]:', error);
-      return null;
+console.error('[Opencode Error]:', error);
+       await logFileOp('read', filePath, false, (error as any).message);
+       return null;
     }
   },
 

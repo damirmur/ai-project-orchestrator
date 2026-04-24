@@ -1,0 +1,4 @@
+import 'dotenv/config';
+import { startVkBot, vk } from './modules/vk/vk.service.ts';
+import { state } from './modules/state/state.service.ts';
+import { initLogFile } from './utils/logger.ts';

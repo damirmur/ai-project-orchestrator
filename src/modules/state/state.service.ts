@@ -1,5 +1,7 @@
+// src/modules/state/state.service.ts
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { logLine } from '../logger/logger.service.ts';
 
 interface SessionState {
   activeFilePath?: string | null;
@@ -31,7 +33,8 @@ class StateService {
     } catch (e) {
       // Если файла нет – начинаем с пустого состояния
       this.state = { global: {}, sessions: {} };
-      await this.save();
+await this.save();
+      await logLine('STATE | init completed');
     }
   }
 
@@ -39,6 +42,7 @@ class StateService {
     const dir = path.dirname(this.stateFile);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(this.stateFile, JSON.stringify(this.state, null, 2), 'utf-8');
+      await logLine('STATE | saved');
   }
 
   getSession(key: string): SessionState {
@@ -52,6 +56,7 @@ class StateService {
     const sess = this.getSession(key);
     updater(sess);
     await this.save();
+    await logLine(`STATE | session ${key} updated`);
   }
 
   async clearSession(key: string): Promise<void> {
