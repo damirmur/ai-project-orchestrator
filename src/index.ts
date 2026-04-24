@@ -1,6 +1,6 @@
 // src/index.ts
-import { state } from '#modules/state/state.service.ts';
-import { startVkBot, vk } from '#modules/vk/vk.service.ts';
+import { state } from './modules/state/state.service.ts';
+import { startVkBot, vk } from './modules/vk/vk.service.ts';
 import { initLogFile } from './utils/logger.ts';
 
 async function bootstrap() {
@@ -15,7 +15,7 @@ async function bootstrap() {
     console.log('🚀 AI Orchestrator полностью запущен');
   } catch (error) {
     console.error('⚠️ Ошибка при запуске VK‑бота (пропускаем):', error);
-    await import('#utils/logger.ts').then(m => m.logLine(`ERROR | VK | ${error?.code ?? 'unknown'} ${error?.message ?? ''}`));
+    await import('./utils/logger.ts').then(m => m.logLine(`ERROR | VK | ${error?.code ?? 'unknown'} ${error?.message ?? ''}`));
   }
 }
 

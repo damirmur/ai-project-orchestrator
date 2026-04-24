@@ -2,19 +2,12 @@
   "name": "ai-project-orchestrator",
   "version": "1.0.0",
   "type": "module",
-  "imports": {
-    "#utils/*": "./dist/utils/*",
-    "#modules/*": "./dist/modules/*",
-    "#src/*": "./dist/*",
-    "#utils/*": "./dist/utils/*",
-    "#src/*": "./dist/*"
-  },
+  "imports": {},
   "engines": {
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "node --watch --env-file=.env --experimental-transform-types src/index.ts",
-    "start": "node --env-file=.env dist/index.js"
+    "dev": "node --watch --env-file=.env --experimental-transform-types src/index.ts"
   },
   "dependencies": {
     "axios": "^1.6.8",

@@ -1,40 +1,140 @@
-# Architecture Overview
+# Architecture Overview (обновлено)
 
 ```
 +-------------------+        +----------------------+        +-------------------+
-|   VK Bot (vk.io) | <----> |  lms.service (LM‑Studio) | <----> |  opencode.service |
+|   VK Bot (vk.io) | <----> |  ModelOrchestrator  | <----> | LMStudioProvider |
+|                   |        |  (src/core/model-orchestrator.ts) |        | (src/core/lm-studio.provider.ts) |
 +-------------------+        +----------------------+        +-------------------+
-          ^                              ^                         ^
-          |                              |                         |
-          |   state.service (persisted JSON)                     |
-          +-----------------------------------------------------+
+          |                              |                       
+          v                              v                       
+|   ConversationHandler (planned)    |        | CloudProvider      |
+|   (src/core/conversation-handler.ts) |        | (src/core/cloud.provider.ts) |
++-------------------+        +----------------------+        +-------------------+
+          |
+          v
+|   opencode.service.ts |
++-------------------+
+
+          ^
+          |
++-------------------+
+|   state.service (persisted JSON) |
+|   (src/modules/state/state.service.ts) |
++-------------------+
 ```
 
-- **vk.service.ts** – получает сообщения из VK, управляет меню, выбирает модель, читает/пишет файлы, отправляет запросы в LM‑Studio.
-- **lms.service.ts** – thin HTTP wrapper над локальным LM‑Studio (`/v1/models`, `/v1/chat/completions`). Формирует системный промпт, учитывая текущий `fileContext`.
-- **opencode.service.ts** – безопасный доступ к файлам внутри `PROJECTS_ROOT`; создает бэкапы, выдаёт список файлов.
-- **state.service.ts** – единственный источник правды о состоянии бота; хранит глобальные данные и отдельные сессии (`userId:peerId`). Состояние сериализуется в `state.json` после каждой модификации.
-- **main.ts** – инициализирует `state`, стартует обновления VK и обрабатывает корректное завершение (`SIGTERM`).
+## Основные компоненты
 
-**Поток данных**
+### 1. ModelOrchestrator (`src/core/model-orchestrator.ts`)
+- **Центральный оркестратор**, управляющий несколькими провайдерами ИИ.
+- Хранит список провайдеров (`Map<string, any>`).
+- Поддерживает стратегии:
+  - `sequential` — опрос провайдеров по порядку.
+  - `parallel` — отправка запросов всем активным провайдерам, возврат первого успешного ответа.
+  - `fallback` — при ошибке переход к следующему провайдеру.
+- Методы:
+  - `registerProvider(provider)` — регистрация провайдера.
+  - `getModels(providerName?)` — получение списка моделей.
+  - `setActiveModel(fullModelId)` — сохранение выбранной модели (формат `"providerName:modelId"`).
+  - `getActiveModel(providerName?)` — получение активной модели.
+  - `hasActiveModel(providerName?)` — проверка наличия активной модели.
+  - `chat(userMessage, sessionKey, context?)` — отправка запроса с учётом стратегии.
+  - `checkStatus()` — проверка статуса всех провайдеров.
+  - `getSystemStats()` — получение статистики (стратегия, провайдеры, проект).
+- **Сохранение состояния:** Активные модели хранятся в `state.global.providers` (объект, где ключ — имя провайдера, значение — `{ activeModelId }`). Стратегия хранится в `state.global.modelStrategy`.
+
+### 2. Провайдеры
+#### LMStudioProvider (`src/core/lm-studio.provider.ts`)
+- Работа с локальным LM Studio (`LMS_URL` из `.env`).
+- API: `/v1/models`, `/v1/chat/completions`.
+- Формирует системный промпт с `context` (содержимое файла).
+- Имеет вспомогательный метод `unloadCurrentModel()` для выгрузки модели.
+
+#### CloudProvider (`src/core/cloud.provider.ts`)
+- Работа с облачным API (например, OpenRouter, `OPENROUTER_KEY` из `.env`).
+- API: `https://openrouter.ai/api/v1/chat/completions`.
+- Поддерживает модели с двоеточиями в ID (например, `google/palm-2-chat-bison`).
+
+### 3. Состояние (`src/modules/state/state.service.ts`)
+- Единственный источник правды о состоянии бота.
+- **GlobalState:**
+  ```typescript
+  interface GlobalState {
+    activeModelId?: string | null; // для обратной совместимости
+    lastMessageId?: number | null;
+    pendingMessage?: string | null;
+    modelStrategy?: 'sequential' | 'parallel' | 'fallback';
+    providers?: Record<string, { activeModelId?: string }>; // провайдер -> его активная модель
+  }
+  ```
+- **SessionState** (ключ — `userId:peerId`):
+  ```typescript
+  interface SessionState {
+    activeFilePath?: string | null;
+    stagedContent?: string | null;
+    lastAiResponse?: string | null;
+    lastMessageId?: number | null;
+    fileContext?: string | null; // контекст текущего файла
+  }
+  ```
+- Состояние сериализуется в `state.json` после каждого изменения.
+
+### 4. VK Adapter (`src/modules/vk/vk.service.ts`)
+- Работа с VK API (VK, Keyboard).
+- Использует `ModelOrchestrator` для выбора моделей и генерации ответов.
+- Команды бота:
+  - `🤖 Модели` — выбор модели (через `ModelOrchestrator.getModels()`).
+  - `🤖 Провайдеры` — меню выбора провайдера и стратегии.
+  - `select_provider` — выбор провайдера.
+  - `set_strategy` — установка стратегии (`sequential`, `parallel`, `fallback`).
+  - `📂 Файлы` — список файлов проекта.
+  - `/read <file>` — чтение файла, сохранение `fileContext` в сессии.
+  - `/write` — запись сгенерированного кода.
+  - `ℹ️ Инфо` — вывод системной информации (стратегия, провайдеры, проект).
+- Использует `opencode.service` для работы с файлами.
+- Использует `state` для управления сессиями.
+
+### 5. OpenCodeService (`src/modules/project/opencode.service.ts`)
+- Безопасный доступ к файлам внутри `PROJECTS_ROOT`.
+- Методы:
+  - `readFile(filePath)` — чтение файла.
+  - `writeFile(filePath, content)` — запись, создание бэкапа (`.bak`).
+  - `getFilesList()` — получение списка файлов.
+  - `getProjectTree()` — получение дерева проекта.
+- (Планируется) `executeCommand(command)` — выполнение shell-команд (тесты, линтеры, установка зависимостей).
+
+## Поток данных
+
 1. Пользователь → VK → `vk.service`.
-2. При выборе файла → `opencode.readFile` → контент передаётся в `lms.service.setFileContext`.
-3. Пользовательские запросы → `lms.service.chat` → ответ сохраняется в `state.session.lastAiResponse`.
-4. `/write` → очистка markdown → `state.session.stagedContent`.
-5. Подтверждение (`✅`) → `opencode.writeFile` → файл обновлён, `state.session` очищается.
+2. При выборе файла → `opencode.readFile` → контент сохраняется в `session.fileContext`.
+3. Пользовательские запросы → `ModelOrchestrator.chat(userMessage, sessionKey, fileContext)` → 
+   - Определяется активная модель (с учётом стратегии).
+   - Запрос отправляется провайдеру (LM Studio или Cloud).
+   - Ответ сохраняется в `session.lastAiResponse`.
+4. `/write` → очистка markdown → `session.stagedContent`.
+5. Подтверждение (`✅`) → `opencode.writeFile` → файл обновлён, `session` очищается.
 
-**Persisted State** (`state.json`)
+## Persisted State (`state.json`)
+
 ```json
 {
-  "global": { "activeModelId": null },
+  "global": {
+    "modelStrategy": "sequential",
+    "providers": {
+      "lm-studio": { "activeModelId": "lm-studio:gemma" },
+      "cloud-openrouter": { "activeModelId": null }
+    },
+    "pendingMessage": null
+  },
   "sessions": {
-    "12345:67890": {
-      "activeFilePath": "src/modules/vk/vk.service.ts",
-      "stagedContent": "...",
-      "lastAiResponse": "...",
-      "pendingMessage": null,
-      "lastMessageId": 42
+    "34240560:2000000004": {
+      "activeFilePath": "src/1.txt",
+      "fileContext": "import ...",
+      "lastAiResponse": "Здравствуйте! ...",
+      "stagedContent": null
     }
   }
 }
 ```
+
+*Обновлено: 2026‑04‑24 (Этап I выполнен).*

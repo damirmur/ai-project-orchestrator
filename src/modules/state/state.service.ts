@@ -7,14 +7,17 @@ interface SessionState {
   activeFilePath?: string | null;
   stagedContent?: string | null;
   lastAiResponse?: string | null;
-  pendingMessage?: string | null;
   lastMessageId?: number | null;
   fileContext?: string | null;
 }
 
 interface GlobalState {
-  activeModelId?: string | null;
+  activeModelId?: string | null; // для обратной совместимости (по умолчанию LM Studio)
   lastMessageId?: number | null;
+  pendingMessage?: string | null;
+  modelStrategy?: 'sequential' | 'parallel' | 'fallback';
+  // провайдеры: ключ - имя провайдера, значение - его состояние
+  providers?: Record<string, { activeModelId?: string | null }>;
 }
 
 interface BotState {
@@ -40,7 +43,7 @@ await this.save();
 
   private async save(): Promise<void> {
     const dir = path.dirname(this.stateFile);
-    await fs.mkdir(dir, { recursive: true });
+
     await fs.writeFile(this.stateFile, JSON.stringify(this.state, null, 2), 'utf-8');
       await logLine('STATE | saved');
   }

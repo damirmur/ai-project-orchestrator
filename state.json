@@ -1,5 +1,12 @@
 {
-  "global": {},
+  "global": {
+    "activeModelId": "gemma",
+    "providers": {
+      "lm-studio": {
+        "activeModelId": "gemma"
+      }
+    }
+  },
   "sessions": {
     "test:1": {
       "activeFilePath": "example.ts",
@@ -7,7 +14,8 @@
     },
     "34240560:2000000004": {
       "lastAiResponse": "Здравствуйте! Я готов помочь вам. Чем я могу быть полезен сегодня? 😊",
-      "activeFilePath": "src/1.txt"
+      "activeFilePath": "src/1.txt",
+      "fileContext": "import 'dotenv/config';\r\nimport { startVkBot, vk } from './modules/vk/vk.service.ts';\r\nimport { state } from './modules/state/state.service.ts';\r\nimport { initLogFile } from './utils/logger.ts';"
     }
   }
 }

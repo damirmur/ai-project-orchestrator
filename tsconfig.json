@@ -6,9 +6,7 @@
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": { "#utils/*": ["src/utils/*"], "#modules/*": ["src/modules/*"], "#src/*": ["src/*"] }
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "projects/src/test.ts"]
+  "include": ["src/**/*.ts"]
 }
