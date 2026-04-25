@@ -83,10 +83,33 @@ async function sendProvidersPicker(context: any) {
 }
 
 vk.updates.on('message_new', async (context) => {
+  // Helper to split long messages
+  function splitMessage(text: string, maxLength: number = 3800): string[] {
+    if (text.length <= maxLength) return [text];
+    const parts: string[] = [];
+    const lines = text.split('\n');
+    let currentPart = '';
+    for (const line of lines) {
+      if ((currentPart + '\n' + line).length > maxLength) {
+        if (currentPart) parts.push(currentPart);
+        currentPart = line;
+      } else {
+        currentPart += (currentPart ? '\n' : '') + line;
+      }
+    }
+    if (currentPart) parts.push(currentPart);
+    return parts;
+  }
+
   // Helper to send a response and log it
   async function sendLog(msg: any) {
-    await logOutgoing(String(context.peerId), typeof msg === 'string' ? msg : JSON.stringify(msg));
-    return context.send(msg).catch(err => logVkError(String(context.peerId), err));
+    let text = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    await logOutgoing(String(context.peerId), text);
+    const parts = splitMessage(text);
+    for (let i = 0; i < parts.length; i++) {
+      await context.send(parts[i]).catch(err => logVkError(String(context.peerId), err));
+      if (parts.length > 1) await new Promise(r => setTimeout(r, 200));
+    }
   }
   let { text, senderId, peerId, id, messagePayload } = context;
   // Log incoming message
@@ -323,7 +346,14 @@ vk.updates.on('message_new', async (context) => {
       await vk.api.messages.setActivity({ peer_id: peerId, type: 'typing' }).catch(() => { });
       const lastModel = state.getGlobal<string>('lastSelectedModelId') || modelOrchestrator.getActiveModel() || 'unknown';
       await logModelRequest(String(senderId), String(peerId), normalizedText, lastModel, undefined);
+      
+      const typingInterval = setInterval(async () => {
+        await vk.api.messages.setActivity({ peer_id: peerId, type: 'typing' }).catch(() => { });
+      }, 10000);
+
       const aiResponse = await modelOrchestrator.chat(normalizedText, sessionKey, session.fileContext);
+      clearInterval(typingInterval);
+      
       session.lastAiResponse = aiResponse;
       await logModelResponse(String(senderId), String(peerId), aiResponse);
       return sendLog(aiResponse);
@@ -336,9 +366,31 @@ vk.updates.on('message_new', async (context) => {
 });
 
 export async function handleIncomingMessage(context: any) {
+  function splitMessage(text: string, maxLength: number = 3800): string[] {
+    if (text.length <= maxLength) return [text];
+    const parts: string[] = [];
+    const lines = text.split('\n');
+    let currentPart = '';
+    for (const line of lines) {
+      if ((currentPart + '\n' + line).length > maxLength) {
+        if (currentPart) parts.push(currentPart);
+        currentPart = line;
+      } else {
+        currentPart += (currentPart ? '\n' : '') + line;
+      }
+    }
+    if (currentPart) parts.push(currentPart);
+    return parts;
+  }
+
   const sendLog = async (msg: any) => {
-    await logOutgoing(String(context.peerId), typeof msg === 'string' ? msg : JSON.stringify(msg));
-    return context.send(msg).catch(err => logVkError(String(context.peerId), err));
+    let text = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    await logOutgoing(String(context.peerId), text);
+    const parts = splitMessage(text);
+    for (let i = 0; i < parts.length; i++) {
+      await context.send(parts[i]).catch(err => logVkError(String(context.peerId), err));
+      if (parts.length > 1) await new Promise(r => setTimeout(r, 200));
+    }
   };
 
   let { text, senderId, peerId, id, messagePayload } = context;
@@ -518,7 +570,14 @@ export async function handleIncomingMessage(context: any) {
       await vk.api.messages.setActivity({ peer_id: peerId, type: 'typing' }).catch(() => { });
       const lastModel = state.getGlobal<string>('lastSelectedModelId') || modelOrchestrator.getActiveModel() || 'unknown';
       await logModelRequest(String(senderId), String(peerId), normalizedText, lastModel, undefined);
+      
+      const typingInterval = setInterval(async () => {
+        await vk.api.messages.setActivity({ peer_id: peerId, type: 'typing' }).catch(() => { });
+      }, 10000);
+
       const aiResponse = await modelOrchestrator.chat(normalizedText, sessionKey, session.fileContext);
+      clearInterval(typingInterval);
+      
       session.lastAiResponse = aiResponse;
       await logModelResponse(String(senderId), String(peerId), aiResponse);
       return sendLog(aiResponse);

@@ -10,7 +10,7 @@
       }
     },
     "modelStrategy": "fallback",
-    "lastSelectedModelId": "cloud-openrouter:minimax/minimax-m2.5:free"
+    "lastSelectedModelId": "lm-studio:google/gemma-4-e4b"
   },
   "sessions": {
     "test:1": {
@@ -23,7 +23,7 @@
       "fileContext": "import 'dotenv/config';\r\nimport { startVkBot, vk } from './modules/vk/vk.service.ts';\r\nimport { state } from './modules/state/state.service.ts';\r\nimport { initLogFile } from './utils/logger.ts';"
     },
     "34240560:2000000002": {
-      "lastAiResponse": "Я — **Gemma 4**. Я большая языковая модель с открытыми весами, разработанная Google DeepMind.",
+      "lastAiResponse": "Я — Claude Code, модель искусственного интеллекта, разработанная компанией Anthropic.",
       "lastMessageId": 1777095053333
     }
   }
