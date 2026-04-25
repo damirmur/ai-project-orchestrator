@@ -3,6 +3,8 @@
 import { state } from '../modules/state/state.service.ts';
 import { LMStudioProvider } from './lm-studio.provider.ts';
 import { CloudProvider } from './cloud.provider.ts';
+import { tryStartLMStudio } from '../utils/lmstudio-autostart.ts';
+import { logLine } from '../modules/logger/logger.service.ts';
 
 export class ModelOrchestrator {
   private providers: Map<string, any> = new Map();
@@ -37,7 +39,9 @@ export class ModelOrchestrator {
   async getModels(providerName?: string): Promise<any[]> {
     if (providerName) {
       const provider = this.providers.get(providerName);
-      return provider ? provider.getModels() : [];
+      if (!provider) return [];
+      const models = await provider.getModels();
+      return models.map((m: any) => ({ ...m, id: `${providerName}:${m.id}` }));
     }
     // Собираем модели от всех провайдеров
     const allModels: any[] = [];
@@ -72,11 +76,13 @@ export class ModelOrchestrator {
     if (!providersState[providerName]) providersState[providerName] = {};
     providersState[providerName].activeModelId = fullModelId; // <-- сохраняем полный ID
     
-    return state.setGlobal('providers', providersState).then(() => {
+    return state.setGlobal('providers', providersState).then(async () => {
       // Для совместимости обновляем и старое поле
       if (providerName === 'lm-studio') {
-        state.setGlobal('activeModelId', fullModelId);
+        await state.setGlobal('activeModelId', fullModelId);
       }
+      // Сохраняем последнюю выбранную модель для быстрого доступа
+      await state.setGlobal('lastSelectedModelId', fullModelId);
       return `✅ Модель выбрана для ${providerName}: ${modelId.split('/').pop()}`;
     });
   }
@@ -110,6 +116,33 @@ export class ModelOrchestrator {
 
   async chat(userMessage: string, sessionKey: string, context?: string): Promise<string> {
     const messages: any[] = [{ role: 'user', content: userMessage }];
+
+    // Проверить последнюю выбранную модель (приоритетная)
+    const lastModelId = state.getGlobal<string>('lastSelectedModelId');
+    console.log('[chat] lastSelectedModelId:', lastModelId);
+    if (lastModelId) {
+      const colonIdx = lastModelId.indexOf(':');
+      if (colonIdx > 0) {
+        const providerName = lastModelId.substring(0, colonIdx);
+        const provider = this.providers.get(providerName);
+        console.log('[chat] providerName:', providerName, 'provider:', provider ? 'found' : 'NOT FOUND');
+        if (provider) {
+          const modelId = lastModelId.substring(colonIdx + 1);
+          try {
+            console.log('[chat] Calling provider.chat with modelId:', modelId);
+            return await provider.chat(modelId, messages, context);
+          } catch (error: any) {
+            console.log('[chat] Provider error:', error.message);
+            // Вернуть ошибку чтобы обработать на уровне бота
+            throw new Error(`Модель недоступна: ${error.message}`);
+          }
+        }
+      }
+    }
+
+    // Не используем fallback - только последняя выбранная модель
+    throw new Error('Нет активной модели');
+    return; // Этот код никогда не выполнится
 
     // Если стратегия parallel — отправляем всем активным провайдерам
     if (this.strategy === 'parallel') {
@@ -169,7 +202,19 @@ export class ModelOrchestrator {
   async checkStatus(): Promise<Record<string, boolean>> {
     const status: Record<string, boolean> = {};
     for (const [name, provider] of this.providers) {
-      status[name] = await provider.checkStatus();
+      if (name === 'lm-studio') {
+        let isOnline = await provider.checkStatus();
+        if (!isOnline) {
+          const startResult = await tryStartLMStudio();
+          if (startResult.success) {
+            isOnline = await provider.checkStatus();
+          }
+          await logLine(`LMStudio checkStatus: ${startResult.message}`);
+        }
+        status[name] = isOnline;
+      } else {
+        status[name] = await provider.checkStatus();
+      }
     }
     return status;
   }

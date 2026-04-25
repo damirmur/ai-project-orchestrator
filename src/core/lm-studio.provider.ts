@@ -1,6 +1,6 @@
 // src/core/lm-studio.provider.ts
 
-import path from 'node:path';
+import { spawn } from 'node:child_process';
 
 export class LMStudioProvider {
   readonly name = 'lm-studio';
@@ -12,9 +12,39 @@ export class LMStudioProvider {
 
   async getModels(): Promise<{ id: string; name?: string }[]> {
     try {
-      const res = await fetch(`${this.baseUrl}/v1/models`);
-      const data = await res.json();
-      return (data.data || []) as { id: string; name?: string }[];
+      const proc = spawn('cmd', ['/c', 'lms', 'ls'], {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      return new Promise((resolve) => {
+        let output = '';
+        proc.stdout.on('data', (data) => { output += data.toString(); });
+        proc.on('close', () => {
+          const lines = output.split('\n');
+          const models: { id: string; name?: string }[] = [];
+          let inLLMSection = false;
+
+          for (const line of lines) {
+            if (line.startsWith('LLM')) {
+              inLLMSection = true;
+              continue;
+            }
+            if (line.startsWith('EMBEDDING') || line.startsWith('---')) {
+              break;
+            }
+
+            if (inLLMSection && line.trim() && !line.includes('PARAMS') && !line.includes('ARCH')) {
+              const match = line.trim().match(/^([^\s(]+)/);
+              if (match) {
+                const id = match[1].trim();
+                models.push({ id, name: id.split('/').pop() });
+              }
+            }
+          }
+          resolve(models);
+        });
+        proc.on('error', () => resolve([]));
+      });
     } catch {
       return [];
     }

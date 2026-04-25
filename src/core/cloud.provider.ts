@@ -2,33 +2,58 @@
 
 export class CloudProvider {
   readonly name = 'cloud-openrouter';
-  private apiKey: string;
   private baseUrl = 'https://openrouter.ai/api/v1';
 
-  constructor(apiKey?: string) {
-    this.apiKey = apiKey || process.env.OPENROUTER_KEY || '';
-    if (!this.apiKey) {
-      console.warn('⚠️ OPENROUTER_KEY не задан. CloudProvider будет недоступен.');
-    }
+  private getApiKey(): string {
+    return process.env.OPENROUTER_KEY || '';
   }
 
   async getModels(): Promise<{ id: string; name?: string }[]> {
+    const apiKey = this.getApiKey();
+    if (!apiKey) return [];
     try {
-      const res = await fetch(`${this.baseUrl}/models`, {
-        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+      const res = await fetch(`${this.baseUrl}/models?output_modalities=text`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
       });
       const data = await res.json();
-      return (data.data || []).map((m: any) => ({
-        id: m.id,
-        name: m.name || m.id
-      }));
+
+      const models = (data.data || []).map((m: any) => {
+        const promptPrice = parseFloat(m.pricing?.prompt || '0');
+        const completionPrice = parseFloat(m.pricing?.completion || '0');
+        const idHasFree = m.id.toLowerCase().includes(':free') || m.id.toLowerCase().includes('/free');
+        return {
+          id: m.id,
+          name: m.name || m.id,
+          isFree: promptPrice === 0 && completionPrice === 0,
+          idHasFree: idHasFree,
+          provider: m.id.split('/')[0].toLowerCase()
+        };
+      });
+
+      const popular = ['openai', 'anthropic', 'meta', 'google', 'mistral', 'xai', 'deepseek', 'qwen', 'microsoft'];
+
+      return models
+        .sort((a, b) => {
+          if (a.idHasFree && !b.idHasFree) return -1;
+          if (!a.idHasFree && b.idHasFree) return 1;
+          if (a.isFree && !b.isFree) return -1;
+          if (!a.isFree && b.isFree) return 1;
+          const aPopular = popular.includes(a.provider);
+          const bPopular = popular.includes(b.provider);
+          if (aPopular && !bPopular) return -1;
+          if (!aPopular && bPopular) return 1;
+          return a.name.localeCompare(b.name);
+        })
+        .slice(0, 100)
+        .map(m => ({ id: m.id, name: m.name }));
     } catch {
       return [];
     }
   }
 
   async chat(modelId: string, messages: any[], context?: string): Promise<string> {
-    if (!this.apiKey) throw new Error('OPENROUTER_KEY не задан');
+    const apiKey = this.getApiKey();
+    if (!apiKey) throw new Error('OPENROUTER_KEY не задан');
 
     const systemMessage = context
       ? `Ты — эксперт-программист. Контекст проекта:\n${context}\n\nТвоя задача: ${messages.find((m: any) => m.role === 'user')?.content || 'помощь с кодом'}`
@@ -39,7 +64,7 @@ export class CloudProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
           model: modelId,
@@ -65,9 +90,11 @@ export class CloudProvider {
   }
 
   async checkStatus(): Promise<boolean> {
+    const apiKey = this.getApiKey();
+    if (!apiKey) return false;
     try {
       const res = await fetch(`${this.baseUrl}/models`, {
-        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+        headers: { 'Authorization': `Bearer ${apiKey}` }
       });
       return res.ok;
     } catch {

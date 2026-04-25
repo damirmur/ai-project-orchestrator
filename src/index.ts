@@ -1,11 +1,16 @@
 // src/index.ts
 import { state } from './modules/state/state.service.ts';
 import { startVkBot, vk } from './modules/vk/vk.service.ts';
-import { initLogFile } from './utils/logger.ts';
-
+import { initLogFile, logLine } from './utils/logger.ts';
+import { tryStartLMStudio } from './utils/lmstudio-autostart.ts';
 async function bootstrap() {
   await state.init();
   await initLogFile();
+  const lmResult = await tryStartLMStudio();
+  await logLine(`LMStudio: ${lmResult.message}`);
+  if (!lmResult.success) {
+    console.warn(`⚠️ LM Studio: ${lmResult.message}`);
+  }
   try {
     if (process.env.VK_TOKEN && process.env.GROUP_ID) {
       await startVkBot();

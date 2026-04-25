@@ -61,3 +61,10 @@ export async function logSessionState(userId: string, peerId: string, state: any
   txt = truncate(txt, 300);
   await logLine(`SESSION | user=${userId} peer=${peerId} state=${txt}`);
 }
+
+export async function logVkError(peerId: string, error: any) {
+  const code = error.code ?? 'unknown';
+  const msg = error.message ?? '';
+  const params = JSON.stringify(error.params ?? {});
+  await logLine(`VK_ERROR | peer=${peerId} code=${code} params=${params} msg="${truncate(msg)}"`);
+}
