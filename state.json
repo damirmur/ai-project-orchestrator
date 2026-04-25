@@ -10,7 +10,8 @@
       }
     },
     "modelStrategy": "fallback",
-    "lastSelectedModelId": "lm-studio:google/gemma-4-e4b"
+    "lastSelectedModelId": "lm-studio:google/gemma-4-e4b",
+    "lastSource": "user"
   },
   "sessions": {
     "test:1": {
@@ -23,8 +24,10 @@
       "fileContext": "import 'dotenv/config';\r\nimport { startVkBot, vk } from './modules/vk/vk.service.ts';\r\nimport { state } from './modules/state/state.service.ts';\r\nimport { initLogFile } from './utils/logger.ts';"
     },
     "34240560:2000000002": {
-      "lastAiResponse": "Я — Claude Code, модель искусственного интеллекта, разработанная компанией Anthropic.",
-      "lastMessageId": 1777095053333
+      "lastAiResponse": "/read src/index.ts",
+      "lastMessageId": 1777095053333,
+      "activeFilePath": "rag-api/src/index.ts",
+      "fileContext": "import { Hono } from 'hono';\nimport { cors } from 'hono/cors';\nimport { createServer } from 'node:http';\nimport type { IncomingMessage, ServerResponse } from 'node:http';\nimport queryRoute from './routes/query.ts';\nimport ingestRoute from './routes/ingest.ts';\nimport searchRoute from './routes/search.ts';\n\nconst app = new Hono();\n\napp.use('*', cors());\n\napp.get('/health', c => c.json({ status: 'ok', ts: Date.now() }));\n\napp.route('/query', queryRoute);\napp.route('/ingest', ingestRoute);\napp.route('/doc', searchRoute);\n\nconst PORT = Number(process.env['PORT'] ?? 3000);\n\nconst server = createServer(async (req: IncomingMessage, res: ServerResponse) => {\n  const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);\n  const headers: Record<string, string> = {};\n  for (const [k, v] of Object.entries(req.headers)) {\n    if (typeof v === 'string') headers[k] = v;\n    else if (Array.isArray(v) && v[0]) headers[k] = v[0];\n  }\n  const res2 = await app.fetch(new Request(url.toString(), {\n    method: req.method,\n    headers,\n    body: req.method !== 'GET' && req.method !== 'HEAD' ? req : undefined\n  }));\n  const outHeaders: Record<string, string> = {};\n  res2.headers.forEach((v: string, k: string) => { outHeaders[k] = v; });\n  res.writeHead(res2.status, outHeaders);\n  res.end(await res2.text());\n});\n\nserver.listen(PORT, () => {\n  console.log(`RAG API listening on :${PORT}`);\n});"
     }
   }
 }

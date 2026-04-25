@@ -50,25 +50,14 @@ export class LMStudioProvider {
     }
   }
 
-  async chat(modelId: string, messages: any[], context?: string): Promise<string> {
-    const systemContent = context
-      ? `Ты — эксперт-программист Node.js. Тебе предоставлен код файла для редактирования:\n\n` +
-        `----------\nТекущий файл: ${messages.find((m: any) => m.role === 'user')?.content || 'не выбран'}.\n${context}\n----------\n\n` +
-        `Твоя задача: проанализировать запрос пользователя и вывести ИСПРАВЛЕННЫЙ код целиком. ` +
-        `Не пиши лишних объяснений, если тебя об этом не просят. ` +
-        `Обязательно используй блоки кода Markdown (например, \`\`typescript ... \`\`).`
-      : "Ты — полезный ИИ-ассистент.";
-
+  async chat(modelId: string, messages: any[]): Promise<string> {
     try {
       const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: modelId,
-          messages: [
-            { role: 'system', content: systemContent },
-            ...messages.filter((m: any) => m.role !== 'system')
-          ],
+          messages,
           temperature: 0.2
         })
       });

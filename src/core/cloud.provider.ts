@@ -1,4 +1,4 @@
-// src/core/cloud.provider.ts//
+// src/core/cloud.provider.ts
 
 export class CloudProvider {
   readonly name = 'cloud-openrouter';
@@ -51,13 +51,9 @@ export class CloudProvider {
     }
   }
 
-  async chat(modelId: string, messages: any[], context?: string): Promise<string> {
+  async chat(modelId: string, messages: any[]): Promise<string> {
     const apiKey = this.getApiKey();
     if (!apiKey) throw new Error('OPENROUTER_KEY не задан');
-
-    const systemMessage = context
-      ? `Ты — эксперт-программист. Контекст проекта:\n${context}\n\nТвоя задача: ${messages.find((m: any) => m.role === 'user')?.content || 'помощь с кодом'}`
-      : "Ты — полезный ИИ-ассистент.";
 
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -68,10 +64,7 @@ export class CloudProvider {
         },
         body: JSON.stringify({
           model: modelId,
-          messages: [
-            { role: 'system', content: systemMessage },
-            ...messages.filter((m: any) => m.role !== 'system')
-          ],
+          messages,
           temperature: 0.2
         })
       });

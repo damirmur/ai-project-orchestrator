@@ -1,4 +1,4 @@
-// src/core/model-orchestrator.ts//
+﻿// src/core/model-orchestrator.ts
 
 import { state } from '../modules/state/state.service.ts';
 import { LMStudioProvider } from './lm-studio.provider.ts';
@@ -6,18 +6,40 @@ import { CloudProvider } from './cloud.provider.ts';
 import { tryStartLMStudio } from '../utils/lmstudio-autostart.ts';
 import { logLine } from '../modules/logger/logger.service.ts';
 
+const SYSTEM_PROMPT = `Ты — эксперт-программист Node.js. У тебя есть доступ к проекту через команды:
+- /tree — показать структуру проектов.
+- /files [path] — список файлов проекта.
+- /read <file> — прочитать файл и показать содержимое.
+- /write [file] — записать изменения.
+- /test — npm test.
+- /lint — tsc --noEmit.
+- /install <package> — npm install.
+- /new <name> — создать проект.
+- /seed <project> [title] — создать seed.
+- /deps <project> — показать зависимости.
+
+ПРАВИЛА:
+1. Когда пользователь просит "покажи файл" или "что в файле" — используй /read <file> и покажи содержимое.
+2. Когда пользователь просит "структуру" или "дерево" — используй /tree.
+3. Не пиши просто команду — бот сам её выполнит и покажет результат.
+4. /read работает с путями: "src/index.ts" или "rag-api/src/index.ts".
+
+При создании RAG-проекта:
+- opencodeEmbedding.createRagDb(dbPath) — создать SQLite базу.
+- opencodeEmbedding.ingestRagText(dbPath, text, docId?) — индексировать текст.
+- opencodeEmbedding.searchRag(dbPath, query, limit?) — поиск по similarity.
+
+ИИ предлагает код, бот записывает в файл.`;
+
 export class ModelOrchestrator {
   private providers: Map<string, any> = new Map();
   private strategy: 'sequential' | 'parallel' | 'fallback' = 'sequential';
 
   constructor() {
-    // Инициализируем провайдеры по умолчанию
     this.registerProvider(new LMStudioProvider());
-    if (process.env.OPENROUTER_KEY) {
+    if (process.env['OPENROUTER_KEY']) {
       this.registerProvider(new CloudProvider());
     }
-
-    // Восстанавливаем стратегию из состояния
     const savedStrategy = state.getGlobal<string>('modelStrategy');
     if (savedStrategy === 'sequential' || savedStrategy === 'parallel' || savedStrategy === 'fallback') {
       this.strategy = savedStrategy;
@@ -43,7 +65,6 @@ export class ModelOrchestrator {
       const models = await provider.getModels();
       return models.map((m: any) => ({ ...m, id: `${providerName}:${m.id}` }));
     }
-    // Собираем модели от всех провайдеров
     const allModels: any[] = [];
     for (const provider of this.providers.values()) {
       const models = await provider.getModels();
@@ -53,35 +74,24 @@ export class ModelOrchestrator {
   }
 
   async setActiveModel(fullModelId: string): Promise<string> {
-    // fullModelId формат: "provider-name:model-id" (может содержать несколько двоеточий)
     const firstColon = fullModelId.indexOf(':');
     if (firstColon === -1) throw new Error(`Неверный формат ID модели: ${fullModelId}`);
     const providerName = fullModelId.substring(0, firstColon);
     const modelId = fullModelId.substring(firstColon + 1);
-    
     if (!this.providers.has(providerName)) {
       throw new Error(`Неизвестный провайдер: ${providerName}`);
     }
-
-    // Для LM Studio выгружаем предыдущую модель
     const provider = this.providers.get(providerName)!;
     if (providerName === 'lm-studio') {
-      try {
-        await provider.unloadCurrentModel?.();
-      } catch {}
+      try { await provider.unloadCurrentModel?.(); } catch {}
     }
-
-    // Сохраняем ВСЮДУ fullModelId (чтобы при отображении было понятно, какой провайдер)
     const providersState = state.getGlobal<Record<string, any>>('providers') || {};
     if (!providersState[providerName]) providersState[providerName] = {};
-    providersState[providerName].activeModelId = fullModelId; // <-- сохраняем полный ID
-    
+    providersState[providerName].activeModelId = fullModelId;
     return state.setGlobal('providers', providersState).then(async () => {
-      // Для совместимости обновляем и старое поле
       if (providerName === 'lm-studio') {
         await state.setGlobal('activeModelId', fullModelId);
       }
-      // Сохраняем последнюю выбранную модель для быстрого доступа
       await state.setGlobal('lastSelectedModelId', fullModelId);
       return `✅ Модель выбрана для ${providerName}: ${modelId.split('/').pop()}`;
     });
@@ -92,7 +102,6 @@ export class ModelOrchestrator {
     if (providerName) {
       return providersState[providerName]?.activeModelId || null;
     }
-    // Для совместимости (старое поле)
     return state.getGlobal('activeModelId') || null;
   }
 
@@ -101,7 +110,6 @@ export class ModelOrchestrator {
     if (providerName) {
       return !!providersState[providerName]?.activeModelId;
     }
-    // Проверяем, есть ли активная модель хотя бы у одного провайдера
     return Object.values(providersState).some((p: any) => !!p.activeModelId);
   }
 
@@ -115,87 +123,22 @@ export class ModelOrchestrator {
   }
 
   async chat(userMessage: string, sessionKey: string, context?: string): Promise<string> {
-    const messages: any[] = [{ role: 'user', content: userMessage }];
-
-    // Проверить последнюю выбранную модель (приоритетная)
     const lastModelId = state.getGlobal<string>('lastSelectedModelId');
-    console.log('[chat] lastSelectedModelId:', lastModelId);
-    if (lastModelId) {
-      const colonIdx = lastModelId.indexOf(':');
-      if (colonIdx > 0) {
-        const providerName = lastModelId.substring(0, colonIdx);
-        const provider = this.providers.get(providerName);
-        console.log('[chat] providerName:', providerName, 'provider:', provider ? 'found' : 'NOT FOUND');
-        if (provider) {
-          const modelId = lastModelId.substring(colonIdx + 1);
-          try {
-            console.log('[chat] Calling provider.chat with modelId:', modelId);
-            return await provider.chat(modelId, messages, context);
-          } catch (error: any) {
-            console.log('[chat] Provider error:', error.message);
-            // Вернуть ошибку чтобы обработать на уровне бота
-            throw new Error(`Модель недоступна: ${error.message}`);
-          }
-        }
-      }
-    }
-
-    // Не используем fallback - только последняя выбранная модель
-    throw new Error('Нет активной модели');
-    return; // Этот код никогда не выполнится
-
-    // Если стратегия parallel — отправляем всем активным провайдерам
-    if (this.strategy === 'parallel') {
-      return this.chatParallel(messages, context);
-    }
-
-    // Sequential или fallback — идем по порядку
-    const providers = this.getProviders();
-    let lastError: any = null;
-
-    for (const provider of providers) {
-      const fullModelId = this.getActiveModel(provider.name);
-      if (!fullModelId) continue;
-
-      // Извлекаем чистый ID модели (убираем префикс провайдера)
-      const firstColon = fullModelId.indexOf(':');
-      const cleanModelId = firstColon >= 0 ? fullModelId.substring(firstColon + 1) : fullModelId;
-
-      try {
-        const response = await provider.chat(cleanModelId, messages, context);
-        return response;
-      } catch (error) {
-        lastError = error;
-        if (this.strategy === 'fallback') {
-          continue; // Пробуем следующий провайдер
-        }
-        break; // При sequential останавливаемся на первой ошибке
-      }
-    }
-
-    throw lastError || new Error('Нет активных моделей или провайдеров');
-  }
-
-  private async chatParallel(messages: any[], context?: string): Promise<string> {
-    const providers = this.getProviders();
-    const promises = providers
-      .filter((p: any) => this.getActiveModel(p.name))
-      .map(async (provider: any) => {
-        const fullModelId = this.getActiveModel(provider.name)!;
-        const firstColon = fullModelId.indexOf(':');
-        const cleanModelId = firstColon >= 0 ? fullModelId.substring(firstColon + 1) : fullModelId;
-        return provider.chat(cleanModelId, messages, context);
-      });
-
+    if (!lastModelId) throw new Error('Нет активной модели');
+    const colonIdx = lastModelId.indexOf(':');
+    if (colonIdx <= 0) throw new Error('Неверный формат модели');
+    const providerName = lastModelId.substring(0, colonIdx);
+    const provider = this.providers.get(providerName);
+    if (!provider) throw new Error(`Неизвестный провайдер: ${providerName}`);
+    const modelId = lastModelId.substring(colonIdx + 1);
+    const systemContent = SYSTEM_PROMPT + (context ? `\n\nКонтекст проекта:\n${context}` : '');
     try {
-      const results = await Promise.allSettled(promises);
-      const firstFulfilled = results.find((r: any) => r.status === 'fulfilled');
-      if (firstFulfilled && firstFulfilled.status === 'fulfilled') {
-        return firstFulfilled.value;
-      }
-      throw new Error('Все параллельные запросы завершились ошибкой');
-    } catch (error) {
-      throw error;
+      return await provider.chat(modelId, [
+        { role: 'system', content: systemContent },
+        { role: 'user', content: userMessage }
+      ]);
+    } catch (error: any) {
+      throw new Error(`Модель недоступна: ${error.message}`);
     }
   }
 
@@ -222,12 +165,11 @@ export class ModelOrchestrator {
   async getSystemStats() {
     const allStatus = await this.checkStatus();
     const activeModels = state.getGlobal<Record<string, any>>('providers') || {};
-    
     return {
       strategy: this.strategy,
       providers: Object.entries(activeModels).map(([name, data]) => {
         const fullId = data?.activeModelId || '';
-        const display = fullId.includes(':') 
+        const display = fullId.includes(':')
           ? fullId.split(':').slice(1).join(':').split('/').pop()
           : fullId.split('/').pop();
         return {
@@ -236,10 +178,9 @@ export class ModelOrchestrator {
           activeModel: fullId ? `${name}: ${display}` : 'не выбрана'
         };
       }),
-      projectRoot: process.env.PROJECTS_ROOT || './projects'
+      projectRoot: process.env['PROJECTS_ROOT'] || './projects'
     };
   }
 }
 
-// Экспортируем экземпляр по умолчанию (для обратной совместимости)
 export const modelOrchestrator = new ModelOrchestrator();

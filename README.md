@@ -43,12 +43,45 @@ npm run dev
 - **lm-studio** – локальные модели (список через `lms ls`)
 - **cloud-openrouter** – облачные модели (бесплатные модели помечаются как "free", сортировка: free → популярные → остальные)
 
+## RAG и эмбеддинги
+Бот поддерживает создание RAG-проектов с использованием эмбеддингов LM Studio.
+
+### Функции эмбеддингов
+Доступны через `opencodeEmbedding` (экспорт `opencode`):
+```typescript
+// Получение эмбеддинга текста
+const { vector } = await opencodeEmbedding.embedText("текст для эмбеддинга");
+// vector: number[] — вектор размерности 768
+
+// Конвертация для SQLite (Float32 → BLOB)
+const blob = opencodeEmbedding.vectorToBlob(vector);
+// blob: Uint8Array
+
+// Обратная конвертация
+const vec = opencodeEmbedding.blobToVector(blob);
+// vec: number[]
+
+// Cosine similarity
+const score = opencodeEmbedding.cosine(vecA, vecB);
+// score: number (0..1)
+```
+
+### Пример RAG-проекта
+Проект `projects/rag-api/` — готовый пример:
+- `src/ingest.ts` — индексация текстов с эмбеддингами
+- `src/search.ts` — поиск по cosine similarity
+- `GET /query?q=` — HTTP endpoint для поиска
+- `scripts/seed.ts` — 18 чанков с документацией
+
 ## Как работает состояние
 - При старте `state.service` читает `state.json` (если нет – создаёт пустой)
 - Для каждого пользователя (`USER_ID:CHAT_PEER_ID`) – отдельная сессия
 - `lastSelectedModelId` – последняя выбранная модель (приоритетная)
 - Состояние сохраняется после каждого изменения
 
-## Дальнейшие шаги
-- При добавлении новых команд – обновлять `AGENTS.md`
-- Документация: `README.md`, `architecture.md`, `AGENTS.md`
+## Документация
+- `AGENTS.md` — справочник для агентов (команды, ограничения)
+- `architecture.md` — архитектура системы
+- `TODO.md` — план развития
+
+*Обновлено: 2026-04-25.*

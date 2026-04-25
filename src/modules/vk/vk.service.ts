@@ -2,8 +2,9 @@
 import { VK, Keyboard } from 'vk-io';
 
 import { modelOrchestrator } from '../../core/model-orchestrator.ts';
+import { findModelCommand } from '../../core/model-commands.ts';
 import { state } from '../state/state.service.ts';
-import { logIncoming, logOutgoing, logCommand, logModelRequest, logModelResponse, logSessionState, logVkError } from '../logger/logger.service.ts';
+import { logIncoming, logOutgoing, logCommand, logModelRequest, logModelResponse, logSessionState, logVkError, logLine } from '../logger/logger.service.ts';
 import { opencode } from '../project/opencode.service.ts';
 import { tryStartLMStudio } from '../../utils/lmstudio-autostart.ts';
 
@@ -103,6 +104,14 @@ vk.updates.on('message_new', async (context) => {
 
   // Helper to send a response and log it
   async function sendLog(msg: any) {
+    // Если это объект с message и keyboard - отправляем как объект (для VK API)
+    if (typeof msg === 'object' && msg !== null && 'message' in msg) {
+      await logOutgoing(String(context.peerId), JSON.stringify(msg));
+      await context.send(msg).catch(err => logVkError(String(context.peerId), err));
+      return;
+    }
+    
+    // Иначе - преобразуем в строку
     let text = typeof msg === 'string' ? msg : JSON.stringify(msg);
     await logOutgoing(String(context.peerId), text);
     const parts = splitMessage(text);
@@ -133,8 +142,10 @@ vk.updates.on('message_new', async (context) => {
   if (senderId !== adminId || peerId !== targetPeerId) return;
 
   const normalizedText = text || '';
-  // Используем одно имя переменной для payload
   const cmdPayload = messagePayload?.command;
+
+  // Установить источник - это сообщение от ПОЛЬЗОВАТЕЛЯ
+  await state.setGlobal('lastSource', 'user');
 
   // --- БЛОК А: ОБРАБОТКА ВЫБОРА МОДЕЛИ + ВОССТАНОВЛЕНИЕ ЗАПРОСА ---
   if (cmdPayload === 'select_model') {
@@ -158,6 +169,7 @@ vk.updates.on('message_new', async (context) => {
 
       // Выполняем отложенный запрос напрямую
       await vk.api.messages.setActivity({ peer_id: peerId, type: 'typing' }).catch(() => { });
+      await state.setGlobal('lastSource', 'model');
       const aiResponse = await modelOrchestrator.chat(pending, sessionKey, session.fileContext);
       session.lastAiResponse = aiResponse;
       await logModelResponse(String(senderId), String(peerId), aiResponse);
@@ -262,26 +274,19 @@ vk.updates.on('message_new', async (context) => {
     const files = await opencode.getFilesList();
     if (files.length === 0) return sendLog('📂 Файлы не найдены.');
 
-    const keyboard = Keyboard.builder();
-    // Выводим максимум 10 файлов для удобства
-    files.slice(0, 10).forEach(file => {
-      keyboard.textButton({
-        label: file.length > 35 ? `...${file.slice(-32)}` : file,
-        payload: { command: 'auto_read', fileName: file },
-        color: 'secondary'
-      }).row();
-    });
-
-    return sendLog({ message: '📂 Выберите файл для анализа:', keyboard: keyboard.inline() });
+    // Показываем текстовый список файлов (без кнопок)
+    const list = files.slice(0, 20).map((file, i) => `${i + 1}. ${file}`).join('\n');
+    return sendLog(`📂 Файлы проекта (введите номер или путь):\n${list}`);
   }
 
   if (normalizedText === '🤖 Модели' || normalizedText === '/models' || cmdPayload === 'models') {
     return sendModelsPicker(context);
   }
 
-  // --- БЛОК В: ОБРАБОТКА /read И /write ---
+  // --- БЛОК В: ОБРАБОТКА /read И /write (только для ПОЛЬЗОВАТЕЛЯ) ---
+  const isUserSource = (await state.getGlobal('lastSource')) !== 'model';
 
-  if (normalizedText.startsWith('/read ')) {
+  if (isUserSource && normalizedText.startsWith('/read ')) {
     const fileName = normalizedText.replace('/read ', '').trim();
     const content = await opencode.readFile(fileName);
     if (content) {
@@ -292,24 +297,31 @@ vk.updates.on('message_new', async (context) => {
     }
     return;
   }
+
+  if (isUserSource && normalizedText === '/tree') {
+    const tree = opencode.getProjectTree();
+    return sendLog(`📁\n\`\`\`\n${tree}\n\`\`\``);
+  }
+
   // --- ОБРАБОТКА AUTO_READ (из кнопки списка) ---
   if (cmdPayload === 'auto_read') {
     const fileName = messagePayload.fileName;
     const content = await opencode.readFile(fileName);
 
     if (content) {
-      await state.updateSession(sessionKey, s => { s.activeFilePath = fileName; s.fileContext = content; }); // Запоминаем путь и контекст
+      await state.updateSession(sessionKey, s => { s.activeFilePath = fileName; s.fileContext = content; });
       await logSessionState(String(senderId), String(peerId), state.getSession(sessionKey));
-      await sendLog(`🎯 Активный файл выбран: ${fileName}. Теперь вы можете отправить запрос к ИИ.`);
-      return; // Обязательно выходим!
+      // Показываем содержимое файла сразу
+      await sendLog(`📄 ${fileName}:\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``);
+      return;
     } else {
       await sendLog(`❌ Не удалось прочитать ${fileName}`);
       return;
     }
   }
 
-  // --- БЛОК /write ---
-  if (normalizedText === '/write' || normalizedText.startsWith('/write ')) {
+  // --- БЛОК /write (только для ПОЛЬЗОВАТЕЛЯ) ---
+  if (isUserSource && (normalizedText === '/write' || normalizedText.startsWith('/write '))) {
     let fileName = normalizedText.replace('/write', '').trim() || session.activeFilePath;
 
     if (!fileName) return sendLog('❌ Активный файл не выбран.');
@@ -351,11 +363,54 @@ vk.updates.on('message_new', async (context) => {
         await vk.api.messages.setActivity({ peer_id: peerId, type: 'typing' }).catch(() => { });
       }, 10000);
 
+      await state.setGlobal('lastSource', 'model');
       const aiResponse = await modelOrchestrator.chat(normalizedText, sessionKey, session.fileContext);
       clearInterval(typingInterval);
       
       session.lastAiResponse = aiResponse;
       await logModelResponse(String(senderId), String(peerId), aiResponse);
+
+      const isFromModel = await state.getGlobal('lastSource') === 'model';
+      if (isFromModel) {
+        const cmd = findModelCommand(aiResponse);
+        if (cmd) {
+          try {
+            switch (cmd.command) {
+              case 'readFile': {
+                let filePath = cmd.args;
+                const prefix = session.projectPrefix || 'rag-api';
+                const content = await opencode.readFile(filePath);
+                if (!content) {
+                  const content2 = await opencode.readFile(prefix + '/' + filePath);
+                  if (content2) filePath = prefix + '/' + filePath;
+                  else return sendLog(`❌ Файл не найден: ${filePath} или ${prefix}/${filePath}`);
+                  return sendLog(`📄 ${filePath}:\n\`\`\`\n${content2.slice(0, 3000)}\n\`\`\``);
+                }
+                return sendLog(`📄 ${filePath}:\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``);
+              }
+              case 'test': {
+                const result = await opencode.executeCommand('npm test');
+                const out = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+                return sendLog(result.success ? `✅ Тесты.\n\`\`\`\n${out.slice(-3000)}\n\`\`\`` : `❌ Ошибка.\n\`\`\`\n${out.slice(-3000)}\n\`\`\``);
+              }
+              case 'lint': {
+                const result = await opencode.executeCommand('npm run typecheck');
+                const out = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+                return sendLog(result.success ? `✅ OK.\n\`\`\`\n${out.slice(-3000)}\n\`\`\`` : `⚠️.\n\`\`\`\n${out.slice(-3000)}\n\`\`\``);
+              }
+              case 'tree': {
+                const tree = opencode.getProjectTree();
+                return sendLog(`📁\n\`\`\`\n${tree}\n\`\`\``);
+              }
+              default:
+                return sendLog(aiResponse);
+            }
+          } catch (e) {
+            return sendLog(`❌ ${(e as any).message}`);
+          }
+        }
+      }
+
       return sendLog(aiResponse);
     } catch (error: any) {
       const errorMsg = error?.message || 'Неизвестная ошибка';
@@ -510,16 +565,14 @@ export async function handleIncomingMessage(context: any) {
   if (normalizedText === '📂 файлы' || normalizedText === '/list' || cmdPayload === 'list') {
     const files = await opencode.getFilesList();
     if (files.length === 0) return sendLog('📂 Файлы не найдены.');
-    const keyboard = Keyboard.builder();
-    files.slice(0, 10).forEach(file => {
-      keyboard.textButton({ label: file.length > 35 ? `...${file.slice(-32)}` : file, payload: { command: 'auto_read', fileName: file }, color: 'secondary' }).row();
-    });
-    return sendLog({ message: '📂 Выберите файл для анализа:', keyboard: keyboard.inline() });
+    // Показываем текстовый список файлов (без кнопок)
+    const list = files.slice(0, 20).map((file, i) => `${i + 1}. ${file}`).join('\n');
+    return sendLog(`📂 Файлы проекта (введите номер или путь):\n${list}`);
   }
 
   if (normalizedText === '🤖 Модели' || normalizedText === '/models' || cmdPayload === 'models') return sendModelsPicker(context);
 
-  if (normalizedText.startsWith('/read ')) {
+  if (isUserSource && normalizedText.startsWith('/read ')) {
     const fileName = normalizedText.replace('/read ', '').trim();
     const content = await opencode.readFile(fileName);
     if (content) {
@@ -531,20 +584,25 @@ export async function handleIncomingMessage(context: any) {
     return;
   }
 
+  if (isUserSource && normalizedText === '/tree') {
+    const tree = opencode.getProjectTree();
+    return sendLog(`📁\n\`\`\`\n${tree}\n\`\`\``);
+  }
+
   if (cmdPayload === 'auto_read') {
     const fileName = messagePayload.fileName;
     const content = await opencode.readFile(fileName);
     if (content) {
       await state.updateSession(sessionKey, s => { s.activeFilePath = fileName; s.fileContext = content; });
       await logSessionState(String(senderId), String(peerId), state.getSession(sessionKey));
-      await sendLog(`🎯 Активный файл выбран: ${fileName}. Теперь вы можете отправить запрос к ИИ.`);
+      await sendLog(`📄 ${fileName}:\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``);
     } else {
       await sendLog(`❌ Не удалось прочитать ${fileName}`);
     }
     return;
   }
 
-  if (normalizedText === '/write' || normalizedText.startsWith('/write ')) {
+  if (isUserSource && (normalizedText === '/write' || normalizedText.startsWith('/write '))) {
     let fileName = normalizedText.replace('/write', '').trim() || session.activeFilePath;
     if (!fileName) return sendLog('❌ Активный файл не выбран.');
     if (!session.lastAiResponse) return sendLog('❌ ИИ еще не предложил код.');
@@ -580,6 +638,45 @@ export async function handleIncomingMessage(context: any) {
       
       session.lastAiResponse = aiResponse;
       await logModelResponse(String(senderId), String(peerId), aiResponse);
+
+      const cmd = findModelCommand(aiResponse);
+      if (cmd) {
+        try {
+          switch (cmd.command) {
+            case 'readFile': {
+              let filePath = cmd.args;
+              const prefix = session.projectPrefix || 'rag-api';
+              const content = await opencode.readFile(filePath);
+              if (!content) {
+                const content2 = await opencode.readFile(prefix + '/' + filePath);
+                if (content2) filePath = prefix + '/' + filePath;
+                else return sendLog(`❌ Файл не найден: ${filePath} или ${prefix}/${filePath}`);
+                return sendLog(`📄 ${filePath}:\n\`\`\`\n${content2.slice(0, 3000)}\n\`\`\``);
+              }
+              return sendLog(`📄 ${filePath}:\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``);
+            }
+            case 'test': {
+              const result = await opencode.executeCommand('npm test');
+              const out = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+              return sendLog(result.success ? `✅ Тесты.\n\`\`\`\n${out.slice(-3000)}\n\`\`\`` : `❌ Ошибка.\n\`\`\`\n${out.slice(-3000)}\n\`\`\``);
+            }
+            case 'lint': {
+              const result = await opencode.executeCommand('npm run typecheck');
+              const out = result.stdout + (result.stderr ? '\n' + result.stderr : '');
+              return sendLog(result.success ? `✅ OK.\n\`\`\`\n${out.slice(-3000)}\n\`\`\`` : `⚠️.\n\`\`\`\n${out.slice(-3000)}\n\`\`\``);
+            }
+            case 'tree': {
+              const tree = opencode.getProjectTree();
+              return sendLog(`📁\n\`\`\`\n${tree}\n\`\`\``);
+            }
+            default:
+              return sendLog(aiResponse);
+          }
+        } catch (e) {
+          return sendLog(`❌ ${(e as any).message}`);
+        }
+      }
+
       return sendLog(aiResponse);
     } catch (error: any) {
       const errorMsg = error?.message || 'Неизвестная ошибка';

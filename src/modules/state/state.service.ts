@@ -9,15 +9,16 @@ interface SessionState {
   lastAiResponse?: string | null;
   lastMessageId?: number | null;
   fileContext?: string | null;
+  projectPrefix?: string | null; // текущий проект для RAG/файлов
 }
 
 interface GlobalState {
-  activeModelId?: string | null; // для обратной совместимости (по умолчанию LM Studio)
+  activeModelId?: string | null;
   lastMessageId?: number | null;
   pendingMessage?: string | null;
   modelStrategy?: 'sequential' | 'parallel' | 'fallback';
-  // провайдеры: ключ - имя провайдера, значение - его состояние
   providers?: Record<string, { activeModelId?: string | null }>;
+  lastSource?: 'user' | 'model';
 }
 
 interface BotState {

@@ -1,26 +1,25 @@
-# Architecture Overview (обновлено)
+# Architecture Overview
+
+## Components Diagram
 
 ```
 +-------------------+        +----------------------+        +-------------------+
-|   VK Bot (vk.io) | <----> |  ModelOrchestrator  | <----> | LMStudioProvider |
-|                   |        |  (src/core/model-orchestrator.ts) |        | (src/core/lm-studio.provider.ts) |
+|   VK Bot (vk.io)  | <----> |  ModelOrchestrator  | <----> | LMStudioProvider  |
+|                   |        |  (src/core/model-   |        | (src/core/lm-     |
+|                   |        |   orchestrator.ts) |        |   studio.provider)|
 +-------------------+        +----------------------+        +-------------------+
-          |                              |                       
-          v                              v                       
-|   ConversationHandler (planned)    |        | CloudProvider      |
-|   (src/core/conversation-handler.ts) |        | (src/core/cloud.provider.ts) |
+          |                              |                        |
+          v                              v                        v
 +-------------------+        +----------------------+        +-------------------+
-          |
-          v
-|   opencode.service.ts |
-+-------------------+
-
-          ^
-          |
-+-------------------+
-|   state.service (persisted JSON) |
-|   (src/modules/state/state.service.ts) |
-+-------------------+
+| opencode.service  |<----> |  CloudProvider      |        |  LMStudioEmbed    |
+| (file ops, RAG)  |        |  (OpenRouter)     |        |  (embeddings)    |
++-------------------+        +----------------------+        +-------------------+
+          ^                                                            |
+          |                                                            v
++-------------------+                           +-------------------+
+| state.service     | <-------------------> | SQLite (rag.db)   |
+| (持久化 JSON)    |                       | (BLOB vectors)    |
++-------------------+                     +-------------------+
 ```
 
 ## Основные компоненты
@@ -41,10 +40,10 @@
   - `chat(userMessage, sessionKey, context?)` — отправка запроса с учётом стратегии.
   - `checkStatus()` — проверка статуса всех провайдеров.
   - `getSystemStats()` — получение статистики (стратегия, провайдеры, проект).
-- **Выбор модели:** Используется `lastSelectedModelId` — последняя выбранная пользователем модель. Приоритет: lastSelectedModelId → активная модель провайдера. Если нет — ошибка.
-- **Сохранение состояния:** Активные модели хранятся в `state.global.providers` (объект, ключ — имя провайдера, значение — `{ activeModelId }`). Стратегия — в `state.global.modelStrategy`. `lastSelectedModelId` — в глобальном состоянии.
+- **SYSTEM_PROMPT**: содержит команды `/read`, `/write`, `/test`, `/lint`, `/install`, `/new`, `/seed`, `/deps` и примеры RAG-функций.
 
 ### 2. Провайдеры
+
 #### LMStudioProvider (`src/core/lm-studio.provider.ts`)
 - Работа с локальным LM Studio (`LMS_URL` из `.env`).
 - API: `/v1/models`, `/v1/chat/completions`.
@@ -52,20 +51,20 @@
 - Имеет вспомогательный метод `unloadCurrentModel()` для выгрузки модели.
 
 #### CloudProvider (`src/core/cloud.provider.ts`)
-- Работа с облачным API (например, OpenRouter, `OPENROUTER_KEY` из `.env`).
+- Работа с облачным API (OpenRouter, `OPENROUTER_KEY` из `.env`).
 - API: `https://openrouter.ai/api/v1/chat/completions`.
-- Поддерживает модели с двоеточиями в ID (например, `google/palm-2-chat-bison`).
+- Поддерживает модели с двоеточиями в ID.
 
 ### 3. Состояние (`src/modules/state/state.service.ts`)
-- Единственный источник правды о состоянии бота.
 - **GlobalState:**
   ```typescript
   interface GlobalState {
-    activeModelId?: string | null; // для обратной совместимости
+    activeModelId?: string | null;
     lastMessageId?: number | null;
     pendingMessage?: string | null;
     modelStrategy?: 'sequential' | 'parallel' | 'fallback';
-    providers?: Record<string, { activeModelId?: string }>; // провайдер -> его активная модель
+    providers?: Record<string, { activeModelId?: string }>;
+    lastSelectedModelId?: string;
   }
   ```
 - **SessionState** (ключ — `userId:peerId`):
@@ -75,47 +74,83 @@
     stagedContent?: string | null;
     lastAiResponse?: string | null;
     lastMessageId?: number | null;
-    fileContext?: string | null; // контекст текущего файла
+    fileContext?: string | null;
   }
   ```
-- Состояние сериализуется в `state.json` после каждого изменения.
 
 ### 4. VK Adapter (`src/modules/vk/vk.service.ts`)
-- Работа с VK API (VK, Keyboard).
-- Использует `ModelOrchestrator` для выбора моделей и генерации ответов.
-- Команды бота:
-  - `/start` — показать закреплённую клавиатуру (ℹ️ Инфо | 📱 Меню).
-  - `ℹ️ Инфо` — вывод системной информации (стратегия, провайдеры, проект).
-  - 📱 Меню — inline меню с провайдерами и инструментами.
-  - `🤖 Провайдеры` — выбор провайдера и стратегии (`sequential`, `parallel`, `fallback`).
-  - `🤖 Модели` — выбор модели с пагинацией (по 5).
-  - `📂 Файлы` — список файлов проекта.
-  - `📊 Статус` — проверка доступности провайдеров и моделей.
-  - `/write` — запись сгенерированного кода.
-  - ✅ / ❌ — подтверждение или отклонение записи.
-  - 🏓 Пинг — проверка работы бота.
-- Использует `opencode.service` для работы с файлами.
-- Использует `state` для управления сессиями.
+- Работа с VK API.
+- Использует `ModelOrchestrator` для генерации ответов.
+- Команды: `/start`, `ℹ️ Инфо`, `📱 Меню`, `🤖 Провайдеры`, `🤖 Модели`, `📂 Файлы`, `📊 Статус`, `/write`, `✅`, `❌`, `🏓 Пинг`.
 
 ### 5. OpenCodeService (`src/modules/project/opencode.service.ts`)
-- Безопасный доступ к файлам внутри `PROJECTS_ROOT`.
-- Методы:
-  - `readFile(filePath)` — чтение файла.
-  - `writeFile(filePath, content)` — запись, создание бэкапа (`.bak`).
-  - `getFilesList()` — получение списка файлов.
-  - `getProjectTree()` — получение дерева проекта.
-- (Планируется) `executeCommand(command)` — выполнение shell-команд (тесты, линтеры, установка зависимостей).
+
+#### Файловые операции
+- `readFile(filePath)` — чтение файла.
+- `writeFile(filePath, content)` — запись с `.bak` бэкапом.
+- `getFilesList()` — список файлов проекта.
+- `getProjectTree()` — дерево проекта.
+
+#### Проектные операции
+- `executeCommand(command)` — безопасное выполнение команд (whitelist).
+- `getProjectMeta()` — scripts, deps, конфиги.
+- `mkProject(name)` — создание структуры проекта.
+- `mkSeed(project, docs)` — генерация seed-скрипта.
+
+#### RAG / Эмбеддинги (`opencodeEmbedding`)
+- `embedText(text)` — эмбеддинг через LM Studio `/v1/embeddings` (модель: `nomic-embed-text-v1.5`). Возвращает `{ vector: number[] }`.
+- `vectorToBlob(vec)` — Float32Array → Uint8Array (SQLite BLOB).
+- `blobToVector(blob)` — Uint8Array → number[].
+- `cosine(vecA, vecB)` — cosine similarity (0..1).
+- `getEmbedConfig()` — `{ url, model }`.
+
+#### Экспорт
+```typescript
+import { opencode, opencodeEmbedding } from './opencode.service.ts';
+// opencodeEmbedding — алиас на opencode
+```
+
+### 6. RAG-проект (`projects/rag-api/`)
+
+#### Структура
+```
+projects/rag-api/
+├── src/
+│   ├── index.ts      # Hono сервер, GET /query?q=
+│   ├── db.ts       # SQLite: chunks, docs, embeddings
+│   ├── ingest.ts   # embedText + save to DB
+│   └── search.ts   # embedText + cosine search
+├── scripts/
+│   └── seed.ts    # 18 чанков документации
+└── data/
+    └── rag.db     # SQLite с BLOB векторами
+```
+
+#### API
+```typescript
+// Ingest
+const { vector } = await opencodeEmbedding.embedText(text);
+const blob = opencodeEmbedding.vectorToBlob(vector);
+// INSERT INTO chunks(text), embeddings(blob)
+
+// Search
+const { vector: qVec } = await opencodeEmbedding.embedText(query);
+const rows = db.query('SELECT text, vector FROM embeddings');
+let best = { text: '', score: 0 };
+for (const row of rows) {
+  const chunkVec = opencodeEmbedding.blobToVector(row.vector);
+  const score = opencodeEmbedding.cosine(qVec, chunkVec);
+  if (score > best.score) best = { text: row.text, score };
+}
+```
 
 ## Поток данных
 
 1. Пользователь → VK → `vk.service`.
-2. При выборе файла → `opencode.readFile` → контент сохраняется в `session.fileContext`.
-3. Пользовательские запросы → `ModelOrchestrator.chat(userMessage, sessionKey, fileContext)` → 
-   - Определяется активная модель (с учётом стратегии).
-   - Запрос отправляется провайдеру (LM Studio или Cloud).
-   - Ответ сохраняется в `session.lastAiResponse`.
-4. `/write` → очистка markdown → `session.stagedContent`.
-5. Подтверждение (`✅`) → `opencode.writeFile` → файл обновлён, `session` очищается.
+2. При выборе файла → `opencode.readFile` → контент в `session.fileContext`.
+3. Запрос → `ModelOrchestrator.chat()` → провайдер → ответ.
+4. При RAG-запросе → `opencodeEmbedding.embedText()` → LM Studio → вектор.
+5. Вектор → SQLite (BLOB) или cosine search.
 
 ## Persisted State (`state.json`)
 
@@ -140,4 +175,4 @@
 }
 ```
 
-*Обновлено: 2026‑04‑25.*
+*Обновлено: 2026-04-25.*
