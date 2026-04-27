@@ -19,6 +19,7 @@ interface GlobalState {
   modelStrategy?: 'sequential' | 'parallel' | 'fallback';
   providers?: Record<string, { activeModelId?: string | null }>;
   lastSource?: 'user' | 'model';
+  modelCapabilities?: Record<string, { hasWebSearch?: boolean; lastChecked?: string }>;
 }
 
 interface BotState {

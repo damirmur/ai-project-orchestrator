@@ -1,33 +1,29 @@
 {
   "global": {
-    "activeModelId": "lm-studio:google/gemma-4-e4b",
     "providers": {
       "lm-studio": {
-        "activeModelId": "lm-studio:google/gemma-4-e4b"
+        "activeModelId": "lm-studio:qwen2.5-1.5b"
       },
       "cloud-openrouter": {
         "activeModelId": "cloud-openrouter:minimax/minimax-m2.5:free"
       }
     },
-    "modelStrategy": "fallback",
-    "lastSelectedModelId": "lm-studio:google/gemma-4-e4b",
-    "lastSource": "user"
+    "activeModelId": "lm-studio:qwen2.5-1.5b",
+    "lastSelectedModelId": "lm-studio:qwen2.5-1.5b",
+    "modelCapabilities": {
+      "minimax/minimax-m2.5:free": {
+        "hasWebSearch": false,
+        "lastChecked": "2026-04-26T08:02:28.603Z"
+      },
+      "qwen2.5-1.5b": {
+        "hasWebSearch": true,
+        "lastChecked": "2026-04-27T02:00:17.181Z"
+      }
+    }
   },
   "sessions": {
-    "test:1": {
-      "activeFilePath": "example.ts",
-      "stagedContent": "console.log(\"hello\");"
-    },
-    "34240560:2000000004": {
-      "lastAiResponse": "Здравствуйте! Я готов помочь вам. Чем я могу быть полезен сегодня? 😊",
-      "activeFilePath": "src/1.txt",
-      "fileContext": "import 'dotenv/config';\r\nimport { startVkBot, vk } from './modules/vk/vk.service.ts';\r\nimport { state } from './modules/state/state.service.ts';\r\nimport { initLogFile } from './utils/logger.ts';"
-    },
-    "34240560:2000000002": {
-      "lastAiResponse": "/read src/index.ts",
-      "lastMessageId": 1777095053333,
-      "activeFilePath": "rag-api/src/index.ts",
-      "fileContext": "import { Hono } from 'hono';\nimport { cors } from 'hono/cors';\nimport { createServer } from 'node:http';\nimport type { IncomingMessage, ServerResponse } from 'node:http';\nimport queryRoute from './routes/query.ts';\nimport ingestRoute from './routes/ingest.ts';\nimport searchRoute from './routes/search.ts';\n\nconst app = new Hono();\n\napp.use('*', cors());\n\napp.get('/health', c => c.json({ status: 'ok', ts: Date.now() }));\n\napp.route('/query', queryRoute);\napp.route('/ingest', ingestRoute);\napp.route('/doc', searchRoute);\n\nconst PORT = Number(process.env['PORT'] ?? 3000);\n\nconst server = createServer(async (req: IncomingMessage, res: ServerResponse) => {\n  const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);\n  const headers: Record<string, string> = {};\n  for (const [k, v] of Object.entries(req.headers)) {\n    if (typeof v === 'string') headers[k] = v;\n    else if (Array.isArray(v) && v[0]) headers[k] = v[0];\n  }\n  const res2 = await app.fetch(new Request(url.toString(), {\n    method: req.method,\n    headers,\n    body: req.method !== 'GET' && req.method !== 'HEAD' ? req : undefined\n  }));\n  const outHeaders: Record<string, string> = {};\n  res2.headers.forEach((v: string, k: string) => { outHeaders[k] = v; });\n  res.writeHead(res2.status, outHeaders);\n  res.end(await res2.text());\n});\n\nserver.listen(PORT, () => {\n  console.log(`RAG API listening on :${PORT}`);\n});"
+    "34240560:2000000003": {
+      "lastAiResponse": "Сегодня **27 апреля 2026 года**, понедельник."
     }
   }
 }

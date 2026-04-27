@@ -1,6 +1,8 @@
 export const MODEL_COMMANDS = [
   { prefix: '/read ', execute: 'readFile', description: 'читать файл' },
   { prefix: '/write ', execute: 'writeFile', description: 'записать файл' },
+  { prefix: '/web-search ', execute: 'webSearch', description: 'веб-поиск' },
+  { prefix: '/web-clean ', execute: 'webClean', description: 'очистка веб-результатов' },
   { prefix: '/test', execute: 'test', description: 'npm test' },
   { prefix: '/lint', execute: 'lint', description: 'tsc --noEmit' },
   { prefix: '/install ', execute: 'install', description: 'npm install' },

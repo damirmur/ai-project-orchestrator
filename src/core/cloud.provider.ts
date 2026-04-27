@@ -1,5 +1,7 @@
 // src/core/cloud.provider.ts
 
+import { logLine } from '../modules/logger/logger.service.ts';
+
 export class CloudProvider {
   readonly name = 'cloud-openrouter';
   private baseUrl = 'https://openrouter.ai/api/v1';
@@ -54,6 +56,7 @@ export class CloudProvider {
   async chat(modelId: string, messages: any[]): Promise<string> {
     const apiKey = this.getApiKey();
     if (!apiKey) throw new Error('OPENROUTER_KEY не задан');
+    const startTime = Date.now();
 
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -66,7 +69,8 @@ export class CloudProvider {
           model: modelId,
           messages,
           temperature: 0.2
-        })
+        }),
+        signal: AbortSignal.timeout(30000)
       });
 
       if (!response.ok) {
@@ -75,9 +79,13 @@ export class CloudProvider {
       }
 
       const data = await response.json();
-      return data.choices?.[0]?.message?.content || 'Нет ответа от облачной модели.';
-    } catch (error) {
-      console.error('[CloudProvider Error]:', error);
+      const result = data.choices?.[0]?.message?.content || 'Нет ответа от облачной модели.';
+      const elapsed = Date.now() - startTime;
+      await logLine(`☁️ CLOUD | ${modelId} | resultLen=${result.length} | time=${elapsed}ms | status=ok`);
+      return result;
+    } catch (error: any) {
+      const elapsed = Date.now() - startTime;
+      await logLine(`❌ CLOUD | ${modelId} | time=${elapsed}ms | error="${error.message}"`);
       throw error;
     }
   }

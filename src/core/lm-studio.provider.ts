@@ -1,6 +1,7 @@
 // src/core/lm-studio.provider.ts
 
 import { spawn } from 'node:child_process';
+import { logLine } from '../modules/logger/logger.service.ts';
 
 export class LMStudioProvider {
   readonly name = 'lm-studio';
@@ -51,6 +52,7 @@ export class LMStudioProvider {
   }
 
   async chat(modelId: string, messages: any[]): Promise<string> {
+    const startTime = Date.now();
     try {
       const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
         method: 'POST',
@@ -59,14 +61,19 @@ export class LMStudioProvider {
           model: modelId,
           messages,
           temperature: 0.2
-        })
+        }),
+        signal: AbortSignal.timeout(60000)
       });
 
-      if (!response.ok) throw new Error('LM Studio API Error');
+      if (!response.ok) throw new Error(`LM Studio API Error: ${response.status}`);
       const data = await response.json();
-      return data.choices[0].message.content;
-    } catch (error) {
-      console.error('[LMStudioProvider Error]:', error);
+      const result = data.choices[0].message.content;
+      const elapsed = Date.now() - startTime;
+      await logLine(`🤖 LM-STUDIO | ${modelId} | resultLen=${result.length} | time=${elapsed}ms | status=ok`);
+      return result;
+    } catch (error: any) {
+      const elapsed = Date.now() - startTime;
+      await logLine(`❌ LM-STUDIO | ${modelId} | time=${elapsed}ms | error="${error.message}"`);
       throw error; // прокидываем ошибку для стратегии fallback
     }
   }

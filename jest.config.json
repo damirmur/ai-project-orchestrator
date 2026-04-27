@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "types": ["node", "jest"]
+  },
+  "testMatch": ["**/src/__tests__/**/*.test.ts"],
+  "transform": {
+    "^.+\\.tsx?$": ["ts-jest", {
+      "useESM": true,
+      "tsconfig": {
+        "module": "ESNext",
+        "moduleResolution": "bundler"
+      }
+    }]
+  },
+  "extensionsToTreatAsEsm": [".ts"],
+  "moduleNameMapper": {
+    "^(\\.{1,2}/.*)\\.js$": "$1"
+  }
+}
